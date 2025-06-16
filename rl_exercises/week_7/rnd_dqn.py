@@ -1,7 +1,8 @@
 """
 Deep Q-Learning with RND implementation.
 """
-
+import matplotlib.pyplot as plt
+import torch
 from typing import Any, Dict, List, Tuple
 
 import gymnasium as gym
@@ -10,6 +11,7 @@ import numpy as np
 import pandas as pd
 from omegaconf import DictConfig
 from rl_exercises.week_4.dqn import DQNAgent, set_seed
+from rl_exercises.week_4.networks import QNetwork
 
 
 class RNDDQNAgent(DQNAgent):
@@ -80,7 +82,14 @@ class RNDDQNAgent(DQNAgent):
         )
         self.seed = seed
         # TODO: initialize the RND networks
-        ...
+        obs_dim = env.observation_space.shape[0]
+        n_actions = env.action_space.n
+        self.rnd_update_freq = target_update_freq
+        self.target_ntwrk = QNetwork(obs_dim, n_actions, rnd_hidden_size)
+        self.pred_ntwrk = QNetwork(obs_dim, n_actions, rnd_hidden_size)
+        self.rnd_optimizer = torch.optim.Adam(self.pred_ntwrk.parameters(), lr=lr)   
+        
+        self.rnd_reward_weight = rnd_reward_weight
 
     def update_rnd(
         self, training_batch: List[Tuple[Any, Any, float, Any, bool, Dict]]
@@ -94,10 +103,25 @@ class RNDDQNAgent(DQNAgent):
             Each is (state, action, reward, next_state, done, info).
         """
         # TODO: get states and next_states from the batch
-        # TODO: compute the MSE
-        # TODO: update the RND network
-        ...
+        states = np.array([t[0] for t in training_batch])
+        states_tensor = torch.tensor(states, dtype=torch.float32)
 
+        next_states = np.array([t[3] for t in training_batch])
+        next_states_tensor = torch.tensor(next_states, dtype=torch.float32)
+        
+        with torch.no_grad():
+            target_output = self.target_ntwrk(next_states_tensor)
+
+        
+        predictor_output = self.pred_ntwrk(next_states_tensor)
+        loss = torch.nn.functional.mse_loss(predictor_output, target_output)
+
+        self.rnd_optimizer.zero_grad()
+        loss.backward()
+        self.rnd_optimizer.step()
+        
+        return loss.item()
+        
     def get_rnd_bonus(self, state: np.ndarray) -> float:
         """Compute the RND bonus for a given state.
 
@@ -111,9 +135,14 @@ class RNDDQNAgent(DQNAgent):
         float
             The RND bonus for the state.
         """
-        # TODO: predict embeddings
-        # TODO: get error
-        ...
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+
+        with torch.no_grad():
+            target_output = self.target_ntwrk(state_tensor)
+            predictor_output = self.pred_ntwrk(state_tensor)
+
+        bonus = torch.nn.functional.mse_loss(predictor_output, target_output).item()
+        return bonus
 
     def train(self, num_frames: int, eval_interval: int = 1000) -> None:
         """
@@ -137,8 +166,8 @@ class RNDDQNAgent(DQNAgent):
             next_state, reward, done, truncated, _ = self.env.step(action)
 
             # TODO: apply RND bonus
-            reward += ...
-
+            reward += self.rnd_reward_weight * self.get_rnd_bonus(next_state)
+            
             # store and step
             self.buffer.add(state, action, reward, next_state, done or truncated, {})
             state = next_state
@@ -149,8 +178,8 @@ class RNDDQNAgent(DQNAgent):
                 batch = self.buffer.sample(self.batch_size)
                 _ = self.update_agent(batch)
 
-            if self.total_steps % self.rnd_update_freq == 0:
-                self.update_rnd(batch)
+                if self.total_steps % self.rnd_update_freq == 0:
+                    self.update_rnd(batch)
 
             if done or truncated:
                 state, _ = self.env.reset()
@@ -179,9 +208,8 @@ def main(cfg: DictConfig):
     set_seed(env, cfg.seed)
 
     # 3) TODO: instantiate & train the agent
-    agent = ...
-    agent.train(...)
-
-
+    agent = RNDDQNAgent(env=env)
+    agent.train(num_frames=20000)
+ 
 if __name__ == "__main__":
     main()

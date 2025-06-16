@@ -4,6 +4,8 @@ Deep Q-Learning implementation.
 
 from typing import Any, Dict, List, Tuple
 
+import pandas as pd
+
 import gymnasium as gym
 import hydra
 import numpy as np
@@ -264,6 +266,9 @@ class DQNAgent(AbstractAgent):
         state, _ = self.env.reset()
         ep_reward = 0.0
         recent_rewards: List[float] = []
+        
+        episode_rewards = []
+        steps = []
 
         for frame in range(1, num_frames + 1):
             action = self.predict_action(state)
@@ -282,6 +287,8 @@ class DQNAgent(AbstractAgent):
             if done or truncated:
                 state, _ = self.env.reset()
                 recent_rewards.append(ep_reward)
+                episode_rewards.append(ep_reward)
+                steps.append(frame)
                 ep_reward = 0.0
                 # logging
                 if len(recent_rewards) % 10 == 0:
@@ -289,7 +296,13 @@ class DQNAgent(AbstractAgent):
                     print(
                         f"Frame {frame}, AvgReward(10): {avg:.2f}, ε={self.epsilon():.3f}"
                     )
-
+        training_data = pd.DataFrame({
+            "steps": steps,
+            "rewards": episode_rewards
+        })
+        training_data.to_csv(f"training_data_dqn_seed.csv", index=False)
+        print("Logs saved.")
+                
         print("Training complete.")
 
 
